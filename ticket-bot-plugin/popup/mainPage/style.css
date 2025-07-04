@@ -1,0 +1,133 @@
+body {
+    overflow:hidden;
+    background-color: #ebe0f9;
+    width: 550px;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+}
+
+.main-color {
+    color: #2f056b; /* Updated text color */
+    font-size: 24px;
+}
+
+.button-row {
+    display: flex;
+    justify-content: space-around;
+    gap: 20px;
+}
+
+.button-concert {
+    background-color: #fff; /* Updated background color */
+    color: #333; /* Updated text color */
+    border: 1px solid #ddd; /* Added a subtle border */
+    border-radius: 8px;
+    padding: 15px;
+    width: 100px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-decoration: none;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Added box-shadow */
+    transition: transform 0.2s ease-in-out;
+}
+
+.button-concert:hover {
+    transform: scale(1.05);
+}
+
+.button-concert img {
+    width: 80%;
+    height: auto;
+    border-radius: 8px;
+}
+
+.booking-site {
+    margin-top: auto; /* Push it to the bottom of the container */
+    text-align: center; /* Center the text */
+    width: 100%; /* Make sure the text takes up the full width */
+}
+
+
+/* Remove underlines from links */
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+.list-booking-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    width: 100%;
+    overflow-y: auto; /* Enable vertical scrolling */
+    max-height: 300px; /* Set a max height for the container */
+}
+
+.booking-item {
+    background-color: #fff;
+    color: #333;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    width: 80%;
+    font-size: 16px;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease-in-out;
+    display: flex;
+    align-items: center; /* Align items vertically in the middle */
+    justify-content: space-between; /* Align items horizontally with space between them */
+    margin-bottom: 10px; /* Add margin-bottom to create space between items */
+}
+
+.booking-item:hover {
+    transform: scale(1.05);
+}
+
+.concert-info {
+    flex-grow: 1; /* Allow the concert info to take the remaining space */
+}
+
+.platform-image {
+    margin-left: 10px; /* Add margin to create space between the text and image */
+    width: 100px;
+}
+
+.concert-name {
+    font-weight: bold;
+}
+
+.delete-button {
+    height: 100%;
+    font-size: 20px;
+    color: red;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    display: flex;
+}
+
+.list-booking-container::-webkit-scrollbar {
+    width: 10px; /* Set the width of the scrollbar */
+}
+
+.list-booking-container::-webkit-scrollbar-track {
+    background-color: #ebe0f9; /* Track color */
+}
+
+.list-booking-container::-webkit-scrollbar-thumb {
+    background-color: #2f056b; /* Thumb color */
+    border-radius: 5px; /* Rounded corners for the thumb */
+}
+
+.list-booking-container::-webkit-scrollbar-thumb:hover {
+    background-color: #5438dc; /* Thumb color on hover */
+}
