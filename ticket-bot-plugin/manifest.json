@@ -6,6 +6,12 @@
     "permissions": [
         "storage"
     ],
+    "host_permissions": [
+        "https://www.feishu.cn/*"
+    ],
+    "background": {
+        "service_worker": "background.js"
+    },
     "web_accessible_resources": [
         {
             "resources": [
