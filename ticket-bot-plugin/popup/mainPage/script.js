@@ -46,6 +46,9 @@ function createConcertItem(booking, index) {
     let time = document.createElement("p");
     time.textContent = `Time: ${booking.time || ""}`;
 
+    let userId = document.createElement("p");
+    userId.textContent = `User ID: ${booking["user-id"] || ""}`;
+
     let section = document.createElement("p");
     // 修复：正确处理section数据，无论它是字符串还是数组
     let sectionText = "";
@@ -62,6 +65,7 @@ function createConcertItem(booking, index) {
     concertInfo.appendChild(concertId);
     concertInfo.appendChild(date);
     concertInfo.appendChild(time);
+    concertInfo.appendChild(userId);
     concertInfo.appendChild(section);
 
     let platformImage = document.createElement("img");
