@@ -47,7 +47,16 @@ function createConcertItem(booking, index) {
     time.textContent = `Time: ${booking.time || ""}`;
 
     let section = document.createElement("p");
-    section.textContent = `Sections: ${Array.isArray(booking.section) ? booking.section.join(", ") : ""}`;
+    // 修复：正确处理section数据，无论它是字符串还是数组
+    let sectionText = "";
+    if (booking.section) {
+        if (Array.isArray(booking.section)) {
+            sectionText = booking.section.join(", ");
+        } else if (typeof booking.section === 'string') {
+            sectionText = booking.section;
+        }
+    }
+    section.textContent = `Sections: ${sectionText}`;
 
     concertInfo.appendChild(concertName);
     concertInfo.appendChild(concertId);

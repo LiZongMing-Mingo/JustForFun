@@ -1,32 +1,34 @@
 <fieldset>
-    <legend>Concert Information</legend>
+    <legend>抢票信息</legend>
     <div class="form-row">
-        <label for="concert-name">Concert Name:</label>
-        <input type="text" id="concert-name" name="concert-name" placeholder="Enter Concert Name">
+        <label for="concert-id">演唱会ID:</label>
+        <input type="text" id="concert-id" name="concert-id" placeholder="Enter Concert ID" required>
+        <small style="display: block; color: #666; margin-top: 4px; font-size: 12px;">
+            在购票主页网址中，查看URL最后面的数字，就是演唱会ID
+        </small>
     </div>
     <div class="form-row">
-        <label for="concert-id">Concert ID:</label>
-        <input type="text" id="concert-id" name="concert-id" placeholder="Enter Concert ID">
-    </div>
-    <div class="form-row">
-        <label for="nb-ticket">Number of Places:</label>
-        <select name="ticket" id="ticket">
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-        </select>
+        <label for="user-id">CustomID:</label>
+        <input type="text" id="user-id" name="user-id" placeholder="Enter your User ID (e.g., N20250703003241bf4)" required>
+        <small style="display: block; color: #666; margin-top: 4px; font-size: 12px;">
+            在购票主页网址，右键-查看网页源代码-cfg.customId的那一串字符串复制过来。EG:N202506251XXXXXXXX
+        </small>
     </div>
     <div class="form-row-half">
         <div class="form-col">
-            <input type="date" id="date" name="date">
+            <label for="date">Date:</label>
+            <input type="date" id="date" name="date" required>
         </div>
         <div class="form-col">
-            <input type="time" id="time" name="time">
+            <label for="time">Time:</label>
+            <input type="time" id="time" name="time" required>
         </div>
     </div>
     <div class="form-row">
-        <label for="section">Preferred Sections:</label>
-        <input type="text" id="section" name="section" placeholder="Enter Sections (e.g., A, B, C)">
+        <label for="section">目标区块列表:</label>
+        <input type="text" id="section" name="section" placeholder="Enter block numbers (e.g., 25,26,27)" required>
+        <small style="display: block; color: #666; margin-top: 4px; font-size: 12px;">
+            输入你想要的区块号码,用英文逗号分隔。例如:25,26 或 101,102,103
+        </small>
     </div>
 </fieldset>
