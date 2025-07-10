@@ -2,7 +2,7 @@
 let seatSelect = []; // 没用 todo:增加自定义选座
 let blockSelect = [25,26]; // 自定义选区 - 将从表单配置中获取
 let SEAT_MAX_CLICK_COUNT = 30; // 单个座位最大点击次数
-let WEBHOOK_URL = ''; // 飞书webhook url
+let WEBHOOK_URL = 'https://www.feishu.cn/flow/api/trigger-webhook/b5393db194f0afb44a06d58102e3c68e'; // 飞书webhook url
 let USERID = 'N20250703003241bf4'; // 用户id - 将从表单配置中获取
 let MAX_SEAT_ID = 9999; // 站票区刷到ID最大值，超过的票不锁  不需要筛ID请填9999
 let REFRESH_INTERVAL = 300; // 刷新时间间隔 根据网络调整
@@ -56,6 +56,8 @@ let sendedIdList = [];
 // region 队列
 let seatQueue = [];// 可选座位队列
 let secondSeatQueue = [];// 被锁过的座位队列 碰运气
+let currentRound = 1; // 当前轮次计数器
+
 function addSeatToQueue(seat) {
     seatQueue.push(seat);
 }
@@ -359,7 +361,6 @@ async function sendSearchSeatRequest(block) {
         if (!data || data.trim().length === 0) {
             console.error(`[DEBUG] 区块 ${block} 返回空响应`);
             showToast(`⚠️ 搜索响应为空<br>区块: ${block}<br>💡 服务器可能正在处理，继续重试`, 'warning', 3000);
-            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]搜索响应为空: block:${block}`);
             return;
         }
         
@@ -367,7 +368,6 @@ async function sendSearchSeatRequest(block) {
         if (!data.includes('<') || !data.includes('>')) {
             console.error(`[DEBUG] 区块 ${block} 返回非XML格式响应:`, data.substring(0, 200));
             showToast(`⚠️ 响应格式异常<br>区块: ${block}<br>💡 可能是网络问题或服务器错误`, 'warning', 3000);
-            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]响应格式异常: block:${block} Response=${data.substring(0, 100)}`);
             return;
         }
         
@@ -375,7 +375,6 @@ async function sendSearchSeatRequest(block) {
         if (data.includes('error') || data.includes('Error') || data.includes('ERROR')) {
             console.error(`[DEBUG] 区块 ${block} 响应包含错误:`, data.substring(0, 300));
             showToast(`❌ 服务器返回错误<br>区块: ${block}<br>💡 可能是区块无效或权限问题`, 'error', 4000);
-            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]服务器返回错误: block:${block} Response=${data.substring(0, 200)}`);
             return;
         }
         
@@ -413,11 +412,6 @@ async function sendSearchSeatRequest(block) {
         // 只在严重错误时显示Toast，避免频繁弹窗
         if (!err.message.includes('Failed to fetch') && !err.message.includes('timeout')) {
             showToast(errorMsg, 'warning', 3000);
-        }
-        
-        // 记录到飞书（简化版，避免spam）
-        if (!err.message.includes('Failed to fetch')) {
-            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]搜索座位失败: block:${block} Error=${err.message}`);
         }
         
         console.log(`[YES24 info] Block ${block} 将在下次循环中重试`);
@@ -480,7 +474,6 @@ async function sendSeatLockRequest(block,seatId,sendmsg=false) {
         if (!data || data.trim().length === 0) {
             console.error(`[DEBUG] 锁定请求返回空响应 区块: ${block} 座位: ${seatId}`);
             toastError(`❌ 锁定响应为空<br>区块: ${block} 座位: ${seatId}<br>💡 服务器可能正忙，稍后重试`, 4000);
-            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]锁定响应为空: block:${block} seat:${seatId}`);
             return;
         }
         
@@ -488,7 +481,6 @@ async function sendSeatLockRequest(block,seatId,sendmsg=false) {
         if (!data.includes('<') || !data.includes('>')) {
             console.error(`[DEBUG] 锁定请求返回非XML格式响应:`, data.substring(0, 200));
             toastError(`❌ 锁定响应格式异常<br>区块: ${block} 座位: ${seatId}<br>💡 可能是网络问题`, 4000);
-            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]锁定响应格式异常: block:${block} seat:${seatId} Response=${data.substring(0, 100)}`);
             return;
         }
         
@@ -507,11 +499,39 @@ async function sendSeatLockRequest(block,seatId,sendmsg=false) {
                 successBlock = block;
                 successId = seatId;
                 showToast(`🎉 座位锁定成功！<br>区块: ${block} 座位: ${seatId}`, 'success', 5000);
-                sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]座位接口锁定成功: block:${block} seat:${seatId}`);
-            } else if (code === 'block') {
+                
+                // 发送结构化成功消息
+                const successData = {
+                    round: currentRound,
+                    successState: "成功",
+                    failState: "",
+                    block: parseInt(block),
+                    seat: parseInt(seatId)
+                };
+                sendFeiShuStructuredMsg(WEBHOOK_URL, successData).then(result => {
+                    if (!result || !result.success) {
+                        logStructuredData(successData);
+                    }
+                });
+            } 
+            else if (code === 'block') {
                 showToast(`⚠️ 被系统block<br>需要验证码`, 'error', 4000);
-                sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]被block: block:${block} seat:${seatId}`);
-            } else {
+                
+                // 发送验证码通知的结构化消息
+                const captchaData = {
+                    round: currentRound,
+                    successState: "",
+                    failState: "验证码",
+                    block: parseInt(block),
+                    seat: parseInt(seatId)
+                };
+                sendFeiShuStructuredMsg(WEBHOOK_URL, captchaData).then(result => {
+                    if (!result || !result.success) {
+                        logStructuredData(captchaData);
+                    }
+                });
+            } 
+            else {
                 // 详细的错误信息处理
                 let errorDetails = getErrorDetails(code, message);
                 let toastMsg = `❌ 锁定失败<br>区块: ${block} 座位: ${seatId}<br>错误码: ${code || '无'}`;
@@ -530,8 +550,20 @@ async function sendSeatLockRequest(block,seatId,sendmsg=false) {
                 
                 showToast(toastMsg, 'error', errorDetails.duration || 4000);
                 
-                if (sendmsg) {
-                    sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]锁定失败: block:${block} seat:${seatId} Code=${code} Message=${message} Description=${errorDetails.description}`);
+                if (sendmsg) {                    
+                    // 发送结构化失败消息
+                    const failData = {
+                        round: currentRound,
+                        successState: "",
+                        failState: "失败",
+                        block: parseInt(block),
+                        seat: parseInt(seatId)
+                    };
+                    sendFeiShuStructuredMsg(WEBHOOK_URL, failData).then(result => {
+                        if (!result || !result.success) {
+                            logStructuredData(failData);
+                        }
+                    });
                 }
             }
         } else {
@@ -565,7 +597,6 @@ async function sendSeatLockRequest(block,seatId,sendmsg=false) {
         }
         
         toastError(errorMsg, 5000);
-        sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]Lock请求失败: block:${block} seat:${seatId} Error=${err.message} Stack=${err.stack?.substring(0, 200)}`);
         })
 }
 
@@ -788,12 +819,10 @@ function parseResponse(xmlString) {
                     
                     let seatElementIdx = layoutSortById["t"+seatId];
                     if (!sendedIdList[seatId]){
-                        sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]刷到座位 block:${block} seat:${seatId} index:${seatElementIdx},seatInfo:${seatInfo}`)
                         sendedIdList[seatId] = true;
                     }
                     // 检查是否站票超过ID最大值
                     if (seatElementIdx && seatElementIdx > MAX_SEAT_ID && block.toString().startsWith("1")) {
-                        // sendFeiShuMsg(WEBHOOK_URL, `站票超过ID最大值，不锁票 block:${block} seat:${seatId} index:${seatElementIdx},seatInfo:${seatInfo}`)
                         return;
                     }
                     
@@ -801,7 +830,6 @@ function parseResponse(xmlString) {
                         if (chooseable == "0") {
                             showToast(`🎯 发现空座！<br>区块: ${block} 座位: ${seatId}<br>序号: ${seatElementIdx}`, 'success', 2000);
                             addSeatToQueue(seat);
-                            sendFeiShuMsg(WEBHOOK_URL,`[${new Date().toLocaleString()}]刷到空座，直接接口锁定 block:${block} seat:${seatId} index:${seatElementIdx},seatInfo:${seatInfo}`)
                         }else{
                             showToast(`🔍 发现座位<br>区块: ${block} 座位: ${seatId}<br>序号: ${seatElementIdx}`, 'warning', 1500);
                             secondSeatQueue.push(seat);
@@ -844,6 +872,11 @@ async function searchSeat() {
         i = (i + 1) % blockSelect.length;
         requestCount++;
         totalRequests++;
+        
+        // 每完成一轮搜索所有区块，增加轮次
+        if (i === 0 && totalRequests > blockSelect.length) {
+            currentRound++;
+        }
         
         // 每隔一定数量的请求显示进度
         if (totalRequests % progressInterval === 0) {
@@ -1017,7 +1050,6 @@ async function lockSeat() {
     
     // 接口锁成功的处理一下选座
     toastSuccess(`🎊 抢票成功！<br>正在处理选座和支付...`, 6000);
-    sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]抢票成功 successBlock:${successBlock} successId:${successId}`);
     await chooseSeatAndGotoPayment(successBlock,successId);
     await sleep(1000);
     clickStepCtrlBtn03();
@@ -1115,4 +1147,124 @@ function toastSuccess(msg, duration = 4000) { showToast(msg, 'success', duration
 function toastError(msg, duration = 4000) { showToast(msg, 'error', duration); }
 function toastWarning(msg, duration = 3000) { showToast(msg, 'warning', duration); }
 function toastInfo(msg, duration = 3000) { showToast(msg, 'info', duration); }
+
+/*--------------------------------- 飞书结构化消息函数 ---------------------------------*/
+// 发送结构化数据到飞书
+async function sendFeiShuStructuredMsg(webhookUrl, data) {
+    if (!webhookUrl) {
+        console.log("WEBHOOK_URL未设置");
+        return;
+    }
+    
+    const payload = {
+        msg_type: 'text',
+        content: data
+    };
+
+    try {
+        // 方案1：使用fetch with no-cors mode
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            mode: 'no-cors', // 绕过CORS限制
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        console.log('飞书结构化消息发送成功 (no-cors模式)');
+        return { success: true, mode: 'no-cors' };
+    } catch (err) {
+        console.warn('no-cors模式发送失败，尝试XMLHttpRequest方式:', err.message);
+    }
+}
+
+// XMLHttpRequest方式发送
+function sendFeiShuWithXHR(webhookUrl, payload) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', webhookUrl, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200 || xhr.status === 0) {
+                    console.log('飞书结构化消息发送成功 (XMLHttpRequest)');
+                    resolve({ success: true, mode: 'xhr' });
+                } else {
+                    reject(new Error(`XMLHttpRequest失败: ${xhr.status}`));
+                }
+            }
+        };
+        
+        xhr.onerror = function() {
+            reject(new Error('XMLHttpRequest网络错误'));
+        };
+        
+        xhr.send(JSON.stringify(payload));
+    });
+}
+
+// JSONP方式发送 (如果webhook支持的话)
+function sendFeiShuWithJSONP(webhookUrl, payload) {
+    return new Promise((resolve, reject) => {
+        // 创建一个临时的全局回调函数
+        const callbackName = 'feiShuCallback_' + Date.now();
+        window[callbackName] = function(response) {
+            console.log('飞书结构化消息发送成功 (JSONP)');
+            delete window[callbackName];
+            document.head.removeChild(script);
+            resolve({ success: true, mode: 'jsonp', response: response });
+        };
+        
+        // 创建script标签
+        const script = document.createElement('script');
+        const params = new URLSearchParams({
+            callback: callbackName,
+            data: JSON.stringify(payload)
+        });
+        script.src = `${webhookUrl}?${params.toString()}`;
+        
+        script.onerror = function() {
+            delete window[callbackName];
+            document.head.removeChild(script);
+            reject(new Error('JSONP请求失败'));
+        };
+        
+        // 设置超时
+        setTimeout(() => {
+            if (window[callbackName]) {
+                delete window[callbackName];
+                document.head.removeChild(script);
+                reject(new Error('JSONP请求超时'));
+            }
+        }, 10000);
+        
+        document.head.appendChild(script);
+    });
+}
+
+// 备用方案：将数据存储到控制台和localStorage
+function logStructuredData(data) {
+    const timestamp = new Date().toLocaleString();
+    const logData = {
+        timestamp: timestamp,
+        ...data
+    };
+    
+    console.log('🚀 飞书结构化数据 (备用记录):', JSON.stringify(logData, null, 2));
+    
+    // 存储到localStorage作为备份
+    try {
+        const existingLogs = JSON.parse(localStorage.getItem('feishu_backup_logs') || '[]');
+        existingLogs.push(logData);
+        // 只保留最近的50条记录
+        if (existingLogs.length > 50) {
+            existingLogs.splice(0, existingLogs.length - 50);
+        }
+        localStorage.setItem('feishu_backup_logs', JSON.stringify(existingLogs));
+    } catch (e) {
+        console.warn('无法存储备份日志:', e.message);
+    }
+}
 //#endregion
