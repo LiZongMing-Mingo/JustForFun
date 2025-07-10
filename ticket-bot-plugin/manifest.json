@@ -29,7 +29,6 @@
                 "https://ticket.yes24.com/Pages/English/Sale/FnPerfSaleProcess.aspx*"
             ],
             "js": [
-                "scripts/common/feishubot.js",
                 "scripts/common/hourToPm.js",
                 "scripts/common/storage.js",
                 "scripts/common/sleep.js",
