@@ -4,8 +4,13 @@ let blockSelect = [25,26]; // 自定义选区 - 将从表单配置中获取
 let SEAT_MAX_CLICK_COUNT = 30; // 单个座位最大点击次数
 let WEBHOOK_URL = ''; // 飞书webhook url
 let USERID = 'N20250703003241bf4'; // 用户id - 将从表单配置中获取
-let MAX_SEAT_ID = 300; // 站票区刷到ID最大值，超过的票不锁  不需要筛ID请填9999
-let REFRESH_INTERVAL = 500; // 刷新时间间隔 根据网络调整
+let MAX_SEAT_ID = 9999; // 站票区刷到ID最大值，超过的票不锁  不需要筛ID请填9999
+let REFRESH_INTERVAL = 300; // 刷新时间间隔 根据网络调整
+
+// 搜索进度提示配置
+let PROGRESS_INTERVAL = 30; // 每N次请求显示一次进度（可调整：15=频繁提示, 50=较少提示）
+let PROGRESS_SHOW_SPEED = true; // 是否显示搜索速度
+let PROGRESS_SHOW_QUEUE = true; // 是否显示队列状态
 
 /*--------------------------------- 配置加载函数 ---------------------------------*/
 async function loadConfigFromForm(concertId) {
@@ -281,10 +286,10 @@ async function chooseSeatAndGotoPayment(block,seatId) {
         if (!seat.className.includes("son")) {
             seat.click();
         }
-        await sleep(1000);
+        await sleep(700);
         // while(!assertLockSuccess()){
             TampermonkeyClick();
-            await sleep(1000);
+            await sleep(700);
         // }
     }
 }
@@ -349,16 +354,73 @@ async function sendSearchSeatRequest(block) {
         .then(response => response.text())
         .then(data => {
         console.log(`[DEBUG] 响应数据长度:`, data.length);
-            parseResponse(data);
+        
+        // 检查响应是否为空或异常
+        if (!data || data.trim().length === 0) {
+            console.error(`[DEBUG] 区块 ${block} 返回空响应`);
+            showToast(`⚠️ 搜索响应为空<br>区块: ${block}<br>💡 服务器可能正在处理，继续重试`, 'warning', 3000);
+            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]搜索响应为空: block:${block}`);
+            return;
+        }
+        
+        // 检查是否为有效的XML格式
+        if (!data.includes('<') || !data.includes('>')) {
+            console.error(`[DEBUG] 区块 ${block} 返回非XML格式响应:`, data.substring(0, 200));
+            showToast(`⚠️ 响应格式异常<br>区块: ${block}<br>💡 可能是网络问题或服务器错误`, 'warning', 3000);
+            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]响应格式异常: block:${block} Response=${data.substring(0, 100)}`);
+            return;
+        }
+        
+        // 检查是否包含错误信息
+        if (data.includes('error') || data.includes('Error') || data.includes('ERROR')) {
+            console.error(`[DEBUG] 区块 ${block} 响应包含错误:`, data.substring(0, 300));
+            showToast(`❌ 服务器返回错误<br>区块: ${block}<br>💡 可能是区块无效或权限问题`, 'error', 4000);
+            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]服务器返回错误: block:${block} Response=${data.substring(0, 200)}`);
+            return;
+        }
+        
+        parseResponse(data);
         console.log(`[YES24 info] Block ${block} 请求成功`);
         })
         .catch(err => {
         console.error(`[YES24 Error] Block ${block} 请求失败:`, err.message);
         console.error(`[DEBUG] 错误详情:`, err);
-        // 如果是超时或网络错误，可以考虑重试
-        if (err.message.includes('超时') || err.message.includes('Failed to fetch')) {
-            console.log(`[YES24 info] Block ${block} 将在下次循环中重试`);
+        
+        // 详细的搜索错误信息
+        let errorMsg = `🔍 搜索座位失败<br>区块: ${block}`;
+        
+        if (err.message) {
+            errorMsg += `<br>错误: ${err.message}`;
         }
+        
+        // 根据错误类型提供不同的建议
+        if (err.name === 'NetworkError' || err.message.includes('network')) {
+            errorMsg += `<br>💡 网络连接问题，将在下次循环重试`;
+        } else if (err.message.includes('timeout')) {
+            errorMsg += `<br>💡 请求超时，服务器响应慢，继续重试`;
+        } else if (err.message.includes('Failed to fetch')) {
+            errorMsg += `<br>💡 网络请求失败，将在下次循环重试`;
+        } else if (err.message.includes('403') || err.message.includes('Forbidden')) {
+            errorMsg += `<br>💡 访问被拒绝，可能需要重新登录`;
+        } else if (err.message.includes('404')) {
+            errorMsg += `<br>💡 请求地址无效，检查区块号`;
+        } else if (err.message.includes('500')) {
+            errorMsg += `<br>💡 服务器内部错误，继续重试`;
+        } else {
+            errorMsg += `<br>💡 未知搜索错误，继续重试`;
+        }
+        
+        // 只在严重错误时显示Toast，避免频繁弹窗
+        if (!err.message.includes('Failed to fetch') && !err.message.includes('timeout')) {
+            showToast(errorMsg, 'warning', 3000);
+        }
+        
+        // 记录到飞书（简化版，避免spam）
+        if (!err.message.includes('Failed to fetch')) {
+            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]搜索座位失败: block:${block} Error=${err.message}`);
+        }
+        
+        console.log(`[YES24 info] Block ${block} 将在下次循环中重试`);
         });
 }
 
@@ -414,6 +476,22 @@ async function sendSeatLockRequest(block,seatId,sendmsg=false) {
         .then(data => {
         console.log(`[DEBUG] Lock响应数据:`, data);
         
+        // 检查响应是否为空或异常
+        if (!data || data.trim().length === 0) {
+            console.error(`[DEBUG] 锁定请求返回空响应 区块: ${block} 座位: ${seatId}`);
+            toastError(`❌ 锁定响应为空<br>区块: ${block} 座位: ${seatId}<br>💡 服务器可能正忙，稍后重试`, 4000);
+            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]锁定响应为空: block:${block} seat:${seatId}`);
+            return;
+        }
+        
+        // 检查是否为有效的XML格式
+        if (!data.includes('<') || !data.includes('>')) {
+            console.error(`[DEBUG] 锁定请求返回非XML格式响应:`, data.substring(0, 200));
+            toastError(`❌ 锁定响应格式异常<br>区块: ${block} 座位: ${seatId}<br>💡 可能是网络问题`, 4000);
+            sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]锁定响应格式异常: block:${block} seat:${seatId} Response=${data.substring(0, 100)}`);
+            return;
+        }
+        
         // 解析XML响应
         const codeMatch = data.match(/<Code>(.*?)<\/Code>/);
         const messageMatch = data.match(/<Message>(.*?)<\/Message>/);
@@ -434,19 +512,206 @@ async function sendSeatLockRequest(block,seatId,sendmsg=false) {
                 showToast(`⚠️ 被系统block<br>需要验证码`, 'error', 4000);
                 sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]被block: block:${block} seat:${seatId}`);
             } else {
-                showToast(`❌ 锁定失败<br>区块: ${block} 座位: ${seatId}<br>错误: ${code}`, 'error', 3000);
+                // 详细的错误信息处理
+                let errorDetails = getErrorDetails(code, message);
+                let toastMsg = `❌ 锁定失败<br>区块: ${block} 座位: ${seatId}<br>错误码: ${code || '无'}`;
+                
+                if (message && message.trim()) {
+                    toastMsg += `<br>错误信息: ${message}`;
+                }
+                
+                if (errorDetails.description) {
+                    toastMsg += `<br>📝 ${errorDetails.description}`;
+                }
+                
+                if (errorDetails.suggestion) {
+                    toastMsg += `<br>💡 ${errorDetails.suggestion}`;
+                }
+                
+                showToast(toastMsg, 'error', errorDetails.duration || 4000);
+                
                 if (sendmsg) {
-                    sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]锁定失败: block:${block} seat:${seatId} Code=${code} Message=${message}`);
+                    sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]锁定失败: block:${block} seat:${seatId} Code=${code} Message=${message} Description=${errorDetails.description}`);
                 }
             }
         } else {
-            toastError(`❌ 无法解析锁定响应`);
+            // 无法解析响应的情况
+            console.log('[DEBUG] 无法解析的响应数据:', data);
+            toastError(`❌ 无法解析锁定响应<br>区块: ${block} 座位: ${seatId}<br>原始响应: ${data.substring(0, 100)}...`);
         }
         })
         .catch(err => {
-        toastError(`🚫 锁定请求失败<br>区块: ${block} 座位: ${seatId}`);
-        sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]Lock请求失败: block:${block} seat:${seatId} Error=${err.message}`);
+        // 详细的网络错误信息
+        console.log('[DEBUG] 锁定请求失败:', err);
+        let errorMsg = `🚫 锁定请求失败<br>区块: ${block} 座位: ${seatId}`;
+        
+        if (err.message) {
+            errorMsg += `<br>错误: ${err.message}`;
+        }
+        
+        // 根据错误类型提供不同的建议
+        if (err.name === 'NetworkError' || err.message.includes('network')) {
+            errorMsg += `<br>💡 网络连接问题，请检查网络`;
+        } else if (err.message.includes('timeout')) {
+            errorMsg += `<br>💡 请求超时，服务器响应慢`;
+        } else if (err.message.includes('403') || err.message.includes('Forbidden')) {
+            errorMsg += `<br>💡 访问被拒绝，可能需要重新登录`;
+        } else if (err.message.includes('404')) {
+            errorMsg += `<br>💡 请求地址无效`;
+        } else if (err.message.includes('500')) {
+            errorMsg += `<br>💡 服务器内部错误`;
+        } else {
+            errorMsg += `<br>💡 未知网络错误，请重试`;
+        }
+        
+        toastError(errorMsg, 5000);
+        sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]Lock请求失败: block:${block} seat:${seatId} Error=${err.message} Stack=${err.stack?.substring(0, 200)}`);
         })
+}
+
+// 获取错误详情说明
+function getErrorDetails(code, message) {
+    const errorMap = {
+        '': {
+            description: '服务器返回空错误码',
+            suggestion: '座位可能已被其他用户锁定',
+            duration: 3000
+        },
+        'null': {
+            description: '返回空值',
+            suggestion: '座位状态异常，继续尝试其他座位',
+            duration: 3000
+        },
+        'undefined': {
+            description: '未定义错误',
+            suggestion: '座位数据异常，尝试其他座位',
+            duration: 3000
+        },
+        'user': {
+            description: '用户相关错误',
+            suggestion: '检查用户ID是否有效',
+            duration: 4000
+        },
+        'seat': {
+            description: '座位不可用',
+            suggestion: '座位已被锁定或不存在',
+            duration: 3000
+        },
+        'time': {
+            description: '时间相关错误',
+            suggestion: '演出时间可能已过期或未开始',
+            duration: 4000
+        },
+        'sold': {
+            description: '座位已售出',
+            suggestion: '座位已被购买，尝试其他座位',
+            duration: 3000
+        },
+        'lock': {
+            description: '座位被锁定',
+            suggestion: '座位被其他用户临时锁定',
+            duration: 3000
+        },
+        'locked': {
+            description: '座位已锁定',
+            suggestion: '座位被其他用户占用，尝试其他座位',
+            duration: 3000
+        },
+        'occupied': {
+            description: '座位被占用',
+            suggestion: '座位已被其他用户选择',
+            duration: 3000
+        },
+        'reserved': {
+            description: '座位已预留',
+            suggestion: '座位被预留，无法选择',
+            duration: 3000
+        },
+        'system': {
+            description: '系统错误',
+            suggestion: '服务器内部错误，稍后重试',
+            duration: 4000
+        },
+        'network': {
+            description: '网络错误',
+            suggestion: '检查网络连接',
+            duration: 4000
+        },
+        'application': {
+            description: '应用程序错误',
+            suggestion: '座位数量限制或其他业务规则',
+            duration: 4000
+        },
+        'session': {
+            description: '会话过期',
+            suggestion: '请重新登录',
+            duration: 4000
+        },
+        'timeout': {
+            description: '请求超时',
+            suggestion: '服务器响应慢，重新尝试',
+            duration: 4000
+        },
+        'invalid': {
+            description: '无效请求',
+            suggestion: '请求参数错误，检查座位信息',
+            duration: 4000
+        },
+        'permission': {
+            description: '权限不足',
+            suggestion: '用户权限不够，检查登录状态',
+            duration: 4000
+        },
+        'limit': {
+            description: '超出限制',
+            suggestion: '可能达到购票数量限制',
+            duration: 4000
+        },
+        'maintenance': {
+            description: '系统维护中',
+            suggestion: '服务器正在维护，稍后重试',
+            duration: 5000
+        }
+    };
+    
+    // 尝试精确匹配
+    if (errorMap[code]) {
+        return errorMap[code];
+    }
+    
+    // 尝试部分匹配
+    for (let key in errorMap) {
+        if (code && code.toLowerCase().includes(key.toLowerCase())) {
+            return errorMap[key];
+        }
+    }
+    
+    // 根据message内容判断
+    if (message) {
+        const msg = message.toLowerCase();
+        if (msg.includes('sold') || msg.includes('购买')) {
+            return errorMap['sold'];
+        }
+        if (msg.includes('lock') || msg.includes('锁定')) {
+            return errorMap['lock'];
+        }
+        if (msg.includes('time') || msg.includes('时间')) {
+            return errorMap['time'];
+        }
+        if (msg.includes('user') || msg.includes('用户')) {
+            return errorMap['user'];
+        }
+        if (msg.includes('system') || msg.includes('系统')) {
+            return errorMap['system'];
+        }
+    }
+    
+    // 默认返回
+    return {
+        description: `未知错误类型: ${code}`,
+        suggestion: '继续尝试其他座位或联系技术支持',
+        duration: 4000
+    };
 }
 
 function parseLayoutData(xmlString) {
@@ -554,11 +819,17 @@ function parseResponse(xmlString) {
 // producer：搜索可用座位添加到列表
 async function searchSeat() {
     getUserInfo();
-    await sleep(1000);
+    await sleep(700);
     let i = 0;
     let requestCount = 0;
+    let totalRequests = 0; // 总请求数
+    let progressInterval = PROGRESS_INTERVAL; // 使用配置的间隔
+    let startTime = Date.now(); // 搜索开始时间
+    let foundSeatsCount = 0; // 发现的座位总数
+    
     await sleep(1000);
-    toastInfo(`🚀 开始搜索座位<br>目标区块: [${blockSelect.join(', ')}]<br>用户ID: ${USERID}`);
+    toastInfo(`🚀 开始搜索座位<br>目标区块: [${blockSelect.join(', ')}]<br>用户ID: ${USERID}<br>📈 每${progressInterval}次请求显示进度<br>💡 刷新页面可停止搜索`);
+    
     while (!isSuccess) {
         if (seatQueue.length > 0) {
             await sleep(10);
@@ -567,26 +838,113 @@ async function searchSeat() {
         if (isSuccess) {
             break;
         }
+        
         // 一直循环遍历blockSelect
         sendSearchSeatRequest(blockSelect[i]);
         i = (i + 1) % blockSelect.length;
         requestCount++;
+        totalRequests++;
+        
+        // 每隔一定数量的请求显示进度
+        if (totalRequests % progressInterval === 0) {
+            const now = Date.now();
+            const elapsed = Math.floor((now - startTime) / 1000); // 已运行秒数
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            const timeStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+            
+            let progressMsg = `🔄 搜索进行中...<br>`;
+            progressMsg += `📊 已搜索: ${totalRequests} 次<br>`;
+            progressMsg += `⏱️ 运行时间: ${timeStr}<br>`;
+            
+            // 可选：显示搜索速度
+            if (PROGRESS_SHOW_SPEED && elapsed > 0) {
+                const requestsPerSecond = (totalRequests / elapsed).toFixed(1);
+                progressMsg += `🚀 搜索速度: ${requestsPerSecond}/秒<br>`;
+            }
+            
+            progressMsg += `🎯 当前区块: ${blockSelect[i % blockSelect.length]}<br>`;
+            
+            // 可选：显示队列状态
+            if (PROGRESS_SHOW_QUEUE) {
+                if (secondSeatQueue.length > 0) {
+                    progressMsg += `💭 二次队列: ${secondSeatQueue.length} 个座位`;
+                } else {
+                    progressMsg += `✨ 持续搜索空座位中...`;
+                }
+            }
+            
+            // 如果发现了座位，显示统计
+            const currentFoundSeats = Object.keys(sendedIdList).length;
+            if (currentFoundSeats > foundSeatsCount) {
+                foundSeatsCount = currentFoundSeats;
+                progressMsg += `<br>🎯 已发现座位: ${foundSeatsCount} 个`;
+            }
+            
+            showToast(progressMsg, 'info', 4000);
+        }
+        
         await sleep(50);
         if (requestCount % 8 === 0) {
             requestCount = 0;
             await sleep(REFRESH_INTERVAL);
         }
     }
+    
+    // 搜索结束统计
+    const totalTime = Math.floor((Date.now() - startTime) / 1000);
+    const minutes = Math.floor(totalTime / 60);
+    const seconds = totalTime % 60;
+    const timeStr = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+    
+    toastSuccess(`🎉 搜索完成！<br>总请求: ${totalRequests} 次<br>总耗时: ${timeStr}<br>发现座位: ${Object.keys(sendedIdList).length} 个`, 6000);
 }
 
 async function trySecondSeat(){
+    // 这个函数现在主要用于兼容性，实际处理由secondSeatProcessor完成
     if (seatQueue.length == 0 && secondSeatQueue.length > 0 && !isSuccess) {
-        let seat = secondSeatQueue.shift();
-        if (seat) {
-            sendSeatLockRequest(seat.block,seat.id,true)
-            await sleep(2000);
+        console.log(`[兼容性] trySecondSeat被调用，但实际处理由secondSeatProcessor完成`);
+        console.log(`[兼容性] 当前二次队列长度: ${secondSeatQueue.length}`);
+    }
+}
+
+// 独立的二次座位处理器 - 并行运行
+async function secondSeatProcessor() {
+    console.log('[二次处理器] 启动二次座位处理器');
+    let attemptCount = 0;
+    
+    while (!isSuccess) {
+        // 智能调度：空座位优先级更高
+        if (seatQueue.length > 0) {
+            // 有空座位时暂停二次处理，让主线程专注处理空座位
+            await sleep(100);
+            continue;
+        }
+        
+        if (secondSeatQueue.length > 0) {
+            let seat = secondSeatQueue.shift();
+            if (seat && !isSuccess) {
+                attemptCount++;
+                console.log(`[二次处理器] 第${attemptCount}次二次尝试: ${seat.block}-${seat.id}`);
+                
+                // 每10次尝试显示一次提示，避免Toast过多
+                if (attemptCount % 10 === 1 || secondSeatQueue.length === 0) {
+                    toastWarning(`🔄 二次尝试 #${attemptCount}<br>区块: ${seat.block} 座位: ${seat.id}<br>队列剩余: ${secondSeatQueue.length}`, 2000);
+                }
+                
+                sendSeatLockRequest(seat.block, seat.id, true);
+                
+                // 动态调整等待时间：队列越长等待越短
+                const waitTime = secondSeatQueue.length > 5 ? 500 : 800;
+                await sleep(waitTime);
+            }
+        } else {
+            // 没有二次座位时，等待更长时间
+            await sleep(1000);
         }
     }
+    
+    console.log(`[二次处理器] 处理器结束，总共尝试了 ${attemptCount} 次二次座位`);
 }
 
 // consumer：从列表中获取座位并尝试锁定
@@ -604,20 +962,59 @@ async function lockSeat() {
     await sleep(3000);
     selectDate(data);
     await sleep(2000);
-    searchSeat(); // 启动爬虫
     selectRange(1);
-    while (!isSuccess) {
-        if (seatQueue.length > 0) {
-            let seat = getSeatFromQueue();
-            if (seat) {
-                sendSeatLockRequest(seat.block,seat.id,true)
+    await sleep(1000);
+    
+    toastInfo('🚀 启动并行抢票系统<br>🔍 主搜索器：寻找空座位<br>🔄 二次处理器：重试已占用座位', 3000);
+    
+    // 使用Promise.all并行启动所有任务
+    await Promise.all([
+        // 主搜索任务
+        (async () => {
+            try {
+                await searchSeat();
+            } catch (error) {
+                console.error('[主搜索器] 错误:', error);
+                toastError(`主搜索器错误: ${error.message}`);
             }
-            popSeatFromQueue();
-            await sleep(300)
-        }else{
-            await sleep(10);
-        }
-    }
+        })(),
+        
+        // 二次座位处理任务
+        (async () => {
+            try {
+                await secondSeatProcessor();
+            } catch (error) {
+                console.error('[二次处理器] 错误:', error);
+                toastError(`二次处理器错误: ${error.message}`);
+            }
+        })(),
+        
+        // 主锁定循环任务
+        (async () => {
+            try {
+                console.log('[主锁定器] 启动主锁定循环');
+                while (!isSuccess) {
+                    if (seatQueue.length > 0) {
+                        let seat = getSeatFromQueue();
+                        if (seat && !isSuccess) {
+                            console.log(`[主锁定器] 处理空座位: ${seat.block}-${seat.id}`);
+                            toastInfo(`🎯 锁定空座位<br>区块: ${seat.block} 座位: ${seat.id}`, 2000);
+                            sendSeatLockRequest(seat.block, seat.id, true);
+                            popSeatFromQueue();
+                            await sleep(200);
+                        }
+                    } else {
+                        await sleep(50); // 没有空座位时短暂等待
+                    }
+                }
+                console.log('[主锁定器] 主锁定循环结束');
+            } catch (error) {
+                console.error('[主锁定器] 错误:', error);
+                toastError(`主锁定器错误: ${error.message}`);
+            }
+        })()
+    ]);
+    
     // 接口锁成功的处理一下选座
     toastSuccess(`🎊 抢票成功！<br>正在处理选座和支付...`, 6000);
     sendFeiShuMsg(WEBHOOK_URL, `[${new Date().toLocaleString()}]抢票成功 successBlock:${successBlock} successId:${successId}`);
