@@ -901,50 +901,17 @@ async function searchSeat() {
 }
 
 async function trySecondSeat(){
-    // 这个函数现在主要用于兼容性，实际处理由secondSeatProcessor完成
     if (seatQueue.length == 0 && secondSeatQueue.length > 0 && !isSuccess) {
-        console.log(`[兼容性] trySecondSeat被调用，但实际处理由secondSeatProcessor完成`);
-        console.log(`[兼容性] 当前二次队列长度: ${secondSeatQueue.length}`);
-    }
-}
-
-// 独立的二次座位处理器 - 并行运行
-async function secondSeatProcessor() {
-    console.log('[二次处理器] 启动二次座位处理器');
-    let attemptCount = 0;
-    
-    while (!isSuccess) {
-        // 智能调度：空座位优先级更高
-        if (seatQueue.length > 0) {
-            // 有空座位时暂停二次处理，让主线程专注处理空座位
-            await sleep(100);
-            continue;
+        let seat = secondSeatQueue.shift();
+        if (seat) {
+            toastWarning(`🔄 尝试二次座位<br>区块: ${seat.block} 座位: ${seat.id}<br>剩余二次队列: ${secondSeatQueue.length} 个<br>💡 已占用座位碰运气重试`);
+            sendSeatLockRequest(seat.block, seat.id, true);
+            await sleep(2000);
         }
-        
-        if (secondSeatQueue.length > 0) {
-            let seat = secondSeatQueue.shift();
-            if (seat && !isSuccess) {
-                attemptCount++;
-                console.log(`[二次处理器] 第${attemptCount}次二次尝试: ${seat.block}-${seat.id}`);
-                
-                // 每10次尝试显示一次提示，避免Toast过多
-                if (attemptCount % 10 === 1 || secondSeatQueue.length === 0) {
-                    toastWarning(`🔄 二次尝试 #${attemptCount}<br>区块: ${seat.block} 座位: ${seat.id}<br>队列剩余: ${secondSeatQueue.length}`, 2000);
-                }
-                
-                sendSeatLockRequest(seat.block, seat.id, true);
-                
-                // 动态调整等待时间：队列越长等待越短
-                const waitTime = secondSeatQueue.length > 5 ? 500 : 800;
-                await sleep(waitTime);
-            }
-        } else {
-            // 没有二次座位时，等待更长时间
-            await sleep(1000);
-        }
+    } else if (secondSeatQueue.length > 0 && PROGRESS_SHOW_QUEUE) {
+        // 只在启用队列显示时才提示
+        console.log(`[二次队列] 当前有 ${secondSeatQueue.length} 个座位等待重试`);
     }
-    
-    console.log(`[二次处理器] 处理器结束，总共尝试了 ${attemptCount} 次二次座位`);
 }
 
 // consumer：从列表中获取座位并尝试锁定
@@ -962,58 +929,31 @@ async function lockSeat() {
     await sleep(3000);
     selectDate(data);
     await sleep(2000);
+    searchSeat(); // 启动爬虫
     selectRange(1);
-    await sleep(1000);
     
-    toastInfo('🚀 启动并行抢票系统<br>🔍 主搜索器：寻找空座位<br>🔄 二次处理器：重试已占用座位', 3000);
+    let lastSecondSeatAttempt = 0; // 记录上次尝试二次座位的时间
     
-    // 使用Promise.all并行启动所有任务
-    await Promise.all([
-        // 主搜索任务
-        (async () => {
-            try {
-                await searchSeat();
-            } catch (error) {
-                console.error('[主搜索器] 错误:', error);
-                toastError(`主搜索器错误: ${error.message}`);
+    while (!isSuccess) {
+        // 优先处理空座位队列
+        if (seatQueue.length > 0) {
+            let seat = getSeatFromQueue();
+            if (seat) {
+                toastInfo(`🎯 尝试锁定空座位: ${seat.block}-${seat.id}`);
+                sendSeatLockRequest(seat.block, seat.id, true);
             }
-        })(),
-        
-        // 二次座位处理任务
-        (async () => {
-            try {
-                await secondSeatProcessor();
-            } catch (error) {
-                console.error('[二次处理器] 错误:', error);
-                toastError(`二次处理器错误: ${error.message}`);
+            popSeatFromQueue();
+            await sleep(300);
+        } else {
+            // 如果没有空座位，尝试二次座位（每5秒尝试一次）
+            const now = Date.now();
+            if (now - lastSecondSeatAttempt > 5000) {
+                await trySecondSeat();
+                lastSecondSeatAttempt = now;
             }
-        })(),
-        
-        // 主锁定循环任务
-        (async () => {
-            try {
-                console.log('[主锁定器] 启动主锁定循环');
-                while (!isSuccess) {
-                    if (seatQueue.length > 0) {
-                        let seat = getSeatFromQueue();
-                        if (seat && !isSuccess) {
-                            console.log(`[主锁定器] 处理空座位: ${seat.block}-${seat.id}`);
-                            toastInfo(`🎯 锁定空座位<br>区块: ${seat.block} 座位: ${seat.id}`, 2000);
-                            sendSeatLockRequest(seat.block, seat.id, true);
-                            popSeatFromQueue();
-                            await sleep(200);
-                        }
-                    } else {
-                        await sleep(50); // 没有空座位时短暂等待
-                    }
-                }
-                console.log('[主锁定器] 主锁定循环结束');
-            } catch (error) {
-                console.error('[主锁定器] 错误:', error);
-                toastError(`主锁定器错误: ${error.message}`);
-            }
-        })()
-    ]);
+            await sleep(100);
+        }
+    }
     
     // 接口锁成功的处理一下选座
     toastSuccess(`🎊 抢票成功！<br>正在处理选座和支付...`, 6000);
