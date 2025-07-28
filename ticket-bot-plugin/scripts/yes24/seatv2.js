@@ -110,6 +110,18 @@ function TampermonkeyClick() {
 
 
 function theFrame() {
+    // 安全检查：确保frames存在且不为空
+    if (!window.frames || window.frames.length === 0) {
+        console.error('[DEBUG] window.frames不存在或为空');
+        return null;
+    }
+    
+    // 安全检查：确保第一个frame存在且有document
+    if (!window.frames[0] || !window.frames[0].document) {
+        console.error('[DEBUG] 第一个frame不存在或没有document');
+        return null;
+    }
+    
     return window.frames[0].document;
 }
 
@@ -191,6 +203,14 @@ function selectRange(idx) {
     // 优先尝试在父窗口中查找grade元素
     let parentDoc = theTopWindow();
     let frame = theFrame();
+    
+    // 安全检查：确保frame存在
+    if (!frame) {
+        console.error('[DEBUG] selectRange: 无法获取iframe内容');
+        toastWarning('⚠️ 无法访问页面内容<br>💡 请检查页面是否正常加载', 3000);
+        return;
+    }
+    
     if (idx == 1) {
         // 看台页面 - 尝试多种可能的元素
         let elements = [
@@ -226,6 +246,10 @@ function selectRange(idx) {
             }
         }
     }
+    
+    // 如果所有尝试都失败，记录警告
+    console.warn(`[DEBUG] selectRange: 未找到idx=${idx}对应的元素`);
+    toastWarning(`⚠️ 未找到座位类型选择元素<br>💡 页面可能未完全加载`, 3000);
 }
 
 async function enterPage(block) {
@@ -247,7 +271,33 @@ async function enterPage(block) {
 
     // 遍历找到block
     frame = theFrame();
-    let seatLayerChildren = frame.getElementsByClassName("seat_layer")[0].children;
+    let seatLayerElement = frame.getElementsByClassName("seat_layer")[0];
+    
+    // 安全检查：确保seat_layer元素存在
+    if (!seatLayerElement) {
+        console.log(`[DEBUG] 未找到seat_layer元素，尝试切换页面`);
+        // 如果block为1开头为内场 打开内场page
+        if (block.toString().startsWith("1")) {
+            selectRange(2);
+            await sleep(300);
+        }
+        else {
+            selectRange(1);
+            await sleep(300);
+        }
+        // 重新获取frame和seat_layer
+        frame = theFrame();
+        seatLayerElement = frame.getElementsByClassName("seat_layer")[0];
+        
+        // 如果还是找不到，记录错误并返回
+        if (!seatLayerElement) {
+            console.error(`[DEBUG] 切换页面后仍未找到seat_layer元素`);
+            toastWarning(`⚠️ 无法找到座位层元素<br>区块: ${block}<br>💡 页面可能未完全加载`, 3000);
+            return;
+        }
+    }
+    
+    let seatLayerChildren = seatLayerElement.children;
     for (let i = 0; i < seatLayerChildren.length; i++) {
         let seatLayerChild = seatLayerChildren[i];
         if (seatLayerChild.textContent.includes(block)) {
@@ -256,6 +306,7 @@ async function enterPage(block) {
             return;
         }
     }
+    
     // 如果遍历完没有找到block，说明在另一个page
     if (block.toString().startsWith("1")) {
         selectRange(2);
@@ -265,8 +316,18 @@ async function enterPage(block) {
         selectRange(1);
         await sleep(300);
     }
+    
     frame = theFrame();
-    seatLayerChildren = frame.getElementsByClassName("seat_layer")[0].children;
+    seatLayerElement = frame.getElementsByClassName("seat_layer")[0];
+    
+    // 再次安全检查
+    if (!seatLayerElement) {
+        console.error(`[DEBUG] 第二次尝试仍未找到seat_layer元素`);
+        toastWarning(`⚠️ 无法找到座位层元素<br>区块: ${block}<br>💡 页面可能未完全加载`, 3000);
+        return;
+    }
+    
+    seatLayerChildren = seatLayerElement.children;
     for (let i = 0; i < seatLayerChildren.length; i++) {
         let seatLayerChild = seatLayerChildren[i];
         if (seatLayerChild.textContent.includes(block)) {
@@ -275,6 +336,10 @@ async function enterPage(block) {
             return;
         }
     }
+    
+    // 如果所有尝试都失败，记录日志
+    console.warn(`[DEBUG] 未找到区块 ${block} 的座位层`);
+    toastWarning(`⚠️ 未找到区块 ${block}<br>💡 可能区块号无效或页面未完全加载`, 3000);
 }
 
 // 接口锁定后 选择座位 去支付
@@ -282,6 +347,14 @@ async function chooseSeatAndGotoPayment(block,seatId) {
     await enterPage(block);
     await sleep(400);
     let frame = theFrame();
+    
+    // 安全检查：确保frame存在
+    if (!frame) {
+        console.error('[DEBUG] 无法获取iframe内容');
+        toastError('❌ 无法访问页面内容<br>💡 请检查页面是否正常加载', 4000);
+        return;
+    }
+    
     let seat = frame.getElementById("t" + seatId.toString());
     if (seat && !seat.className.includes("s13")) {
         // 如果seat的class不包含son，则点击 son说明已选中
@@ -293,6 +366,9 @@ async function chooseSeatAndGotoPayment(block,seatId) {
             TampermonkeyClick();
             await sleep(700);
         // }
+    } else {
+        console.warn(`[DEBUG] 未找到座位元素: t${seatId}`);
+        toastWarning(`⚠️ 未找到座位 t${seatId}<br>💡 座位可能已被选择或不存在`, 3000);
     }
 }
 // endregion
