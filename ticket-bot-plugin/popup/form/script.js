@@ -40,11 +40,14 @@ document.addEventListener('DOMContentLoaded', function  () {
             data[key] = value.trim();
         }
         
-        // 验证用户ID格式
-        if (!data["user-id"] || data["user-id"].length < 10) {
-            alert("请输入有效的用户ID");
-            form.getElementsByTagName("button")[0].disabled = false;
-            return;
+        // 仅对需要的平台校验用户ID（例如 yes24）。melon 不强制要求
+        const platform = form.getElementsByTagName("button")[0].id;
+        if (platform === "yes24") {
+            if (!data["user-id"] || data["user-id"].length < 10) {
+                alert("请输入有效的用户ID（仅 YES24 需要）");
+                form.getElementsByTagName("button")[0].disabled = false;
+                return;
+            }
         }
         
         // 验证区块配置
@@ -54,17 +57,31 @@ document.addEventListener('DOMContentLoaded', function  () {
             return;
         }
         
-        // 验证区块格式并转换
+        // 验证区块格式并转换（根据平台支持不同格式）
         const sections = data["section"].split(",").map(s => s.trim());
-        const validSections = sections.filter(s => /^\d+$/.test(s));
-        if (validSections.length === 0) {
-            alert("请输入有效的区块号码，例如：25,26");
-            form.getElementsByTagName("button")[0].disabled = false;
-            return;
+        let validSections;
+        
+        if (platform === "melon") {
+            // MelonTicket 支持字母和数字区块
+            validSections = sections.filter(s => /^[A-Za-z0-9]+$/.test(s));
+            if (validSections.length === 0) {
+                alert("请输入有效的区块，例如：A,B,C 或 25,26");
+                form.getElementsByTagName("button")[0].disabled = false;
+                return;
+            }
+        } else {
+            // 其他平台仅支持数字区块
+            validSections = sections.filter(s => /^\d+$/.test(s));
+            if (validSections.length === 0) {
+                alert("请输入有效的区块号码，例如：25,26");
+                form.getElementsByTagName("button")[0].disabled = false;
+                return;
+            }
         }
+        
         data["section"] = validSections.join(",");
         
-        data["platform"] = form.getElementsByTagName("button")[0].id;
+        data["platform"] = platform;
         let array = await get_stored_value("autoBooking") || [];
         store_value(data["concert-id"], data);
         
