@@ -1,6 +1,7 @@
 /*--------------------------------- 自定义配置 从表单获取 ---------------------------------*/
 let seatSelect = []; // 没用 todo:增加自定义选座
 let blockSelect = [25,26]; // 自定义选区 - 将从表单配置中获取
+let rowSelect = []; // 自定义排号 - 将从表单配置中获取
 let SEAT_MAX_CLICK_COUNT = 30; // 单个座位最大点击次数
 let WEBHOOK_URL = 'https://www.feishu.cn/flow/api/trigger-webhook/b5393db194f0afb44a06d58102e3c68e'; // 飞书webhook url
 let USERID = 'N20250703003241bf4'; // 用户id - 将从表单配置中获取
@@ -11,6 +12,81 @@ let REFRESH_INTERVAL = 300; // 刷新时间间隔 根据网络调整
 let PROGRESS_INTERVAL = 30; // 每N次请求显示一次进度（可调整：15=频繁提示, 50=较少提示）
 let PROGRESS_SHOW_SPEED = true; // 是否显示搜索速度
 let PROGRESS_SHOW_QUEUE = true; // 是否显示队列状态
+
+/*--------------------------------- 排号提取函数 ---------------------------------*/
+function extractRowNumber(seatValue) {
+    // 尝试从座位值中提取排号
+    // 常见的座位值格式：
+    // 1. "1-1" (排号-座位号)
+    // 2. "1A" (排号+座位号)
+    // 3. "R1S1" (Row1Seat1)
+    // 4. "1" (只有排号)
+    
+    if (!seatValue) return null;
+    
+    // 尝试匹配 "数字-数字" 格式
+    let match = seatValue.match(/^(\d+)-(\d+)$/);
+    if (match) {
+        return parseInt(match[1]); // 返回排号
+    }
+    
+    // 尝试匹配 "数字+字母" 格式 (如: 1A, 2B)
+    match = seatValue.match(/^(\d+)[A-Za-z]/);
+    if (match) {
+        return parseInt(match[1]); // 返回排号
+    }
+    
+    // 尝试匹配 "R数字S数字" 格式
+    match = seatValue.match(/R(\d+)S\d+/i);
+    if (match) {
+        return parseInt(match[1]); // 返回排号
+    }
+    
+    // 尝试匹配纯数字 (可能是排号)
+    match = seatValue.match(/^(\d+)$/);
+    if (match) {
+        let num = parseInt(match[1]);
+        // 如果数字在合理范围内 (1-50)，认为是排号
+        if (num >= 1 && num <= 50) {
+            return num;
+        }
+    }
+    
+    return null;
+}
+
+/*--------------------------------- 排号解析函数 ---------------------------------*/
+function parseRowNumbers(rowNumbersStr) {
+    let rows = [];
+    const parts = rowNumbersStr.split(',');
+    
+    for (let part of parts) {
+        part = part.trim();
+        
+        // 处理范围格式 (如: 10-15)
+        if (part.includes('-')) {
+            const range = part.split('-');
+            if (range.length === 2) {
+                const start = parseInt(range[0].trim());
+                const end = parseInt(range[1].trim());
+                if (!isNaN(start) && !isNaN(end) && start <= end) {
+                    for (let i = start; i <= end; i++) {
+                        rows.push(i);
+                    }
+                }
+            }
+        } else {
+            // 处理单个数字
+            const num = parseInt(part);
+            if (!isNaN(num)) {
+                rows.push(num);
+            }
+        }
+    }
+    
+    // 去重并排序
+    return [...new Set(rows)].sort((a, b) => a - b);
+}
 
 /*--------------------------------- 配置加载函数 ---------------------------------*/
 async function loadConfigFromForm(concertId) {
@@ -29,6 +105,12 @@ async function loadConfigFromForm(concertId) {
                 // 将字符串转换为数字数组
                 blockSelect = data.section.split(',').map(num => parseInt(num.trim())).filter(num => !isNaN(num));
                 toastSuccess(`✅ 区块配置已加载: [${blockSelect.join(', ')}]`);
+            }
+            
+            // 更新rowSelect
+            if (data['row-numbers']) {
+                rowSelect = parseRowNumbers(data['row-numbers']);
+                toastSuccess(`✅ 排号配置已加载: [${rowSelect.join(', ')}]`);
             }
             
             toastInfo('⚙️ 表单配置加载完成');
@@ -830,6 +912,7 @@ function parseLayoutData(xmlString) {
     const layoutData = layoutMatch ? layoutMatch[1] : "";
     
     let layoutSortById = {}; // 存储座位ID和递增序号的对应关系
+    let seatRowInfo = {}; // 存储座位ID和排号的对应关系
     
     if (layoutData) {
         
@@ -848,8 +931,18 @@ function parseLayoutData(xmlString) {
                 
                 if (idMatch && valueMatch) {
                     let seatId = idMatch[1];
+                    let seatValue = valueMatch[1];
+                    
                     // 存储到layoutSortById对象中，key为座位ID，value为递增序号
                     layoutSortById[seatId] = sortIndex;
+                    
+                    // 尝试从座位值中提取排号信息
+                    // 座位值通常包含排号和座位号信息，格式可能是 "排号-座位号" 或 "排号座位号"
+                    let rowNumber = extractRowNumber(seatValue);
+                    if (rowNumber) {
+                        seatRowInfo[seatId] = rowNumber;
+                    }
+                    
                     sortIndex++; // 递增序号
                 }
             });
@@ -858,15 +951,18 @@ function parseLayoutData(xmlString) {
         }
     }
     
-    return layoutSortById; // 添加return语句
+    return { layoutSortById, seatRowInfo }; // 返回两个对象
 }
 
 function parseResponse(xmlString) {
     // 使用正则表达式解析XML，避免使用DOMParser
     let layoutSortById = {};
+    let seatRowInfo = {};
     // 先尝试解析Layout数据
     if (xmlString.includes('<Layout>')) {
-        layoutSortById = parseLayoutData(xmlString);
+        const layoutData = parseLayoutData(xmlString);
+        layoutSortById = layoutData.layoutSortById;
+        seatRowInfo = layoutData.seatRowInfo;
     }
 
     // 获取 Block 值
@@ -902,12 +998,23 @@ function parseResponse(xmlString) {
                         return;
                     }
                     
+                    // 检查排号过滤
+                    if (rowSelect.length > 0) {
+                        let seatRow = seatRowInfo["t"+seatId];
+                        if (seatRow && !rowSelect.includes(seatRow)) {
+                            // 如果配置了排号过滤且当前座位不在目标排号中，跳过
+                            return;
+                        }
+                    }
+                    
                     if (!isSuccess) {
                         if (chooseable == "0") {
-                            showToast(`🎯 发现空座！<br>区块: ${block} 座位: ${seatId}<br>序号: ${seatElementIdx}`, 'success', 2000);
+                            let rowInfo = seatRowInfo["t"+seatId] ? ` 排号: ${seatRowInfo["t"+seatId]}` : '';
+                            showToast(`🎯 发现空座！<br>区块: ${block} 座位: ${seatId}<br>序号: ${seatElementIdx}${rowInfo}`, 'success', 2000);
                             addSeatToQueue(seat);
                         }else{
-                            showToast(`🔍 发现座位<br>区块: ${block} 座位: ${seatId}<br>序号: ${seatElementIdx}`, 'warning', 1500);
+                            let rowInfo = seatRowInfo["t"+seatId] ? ` 排号: ${seatRowInfo["t"+seatId]}` : '';
+                            showToast(`🔍 发现座位<br>区块: ${block} 座位: ${seatId}<br>序号: ${seatElementIdx}${rowInfo}`, 'warning', 1500);
                             secondSeatQueue.push(seat);
                         }
                     }
@@ -932,7 +1039,8 @@ async function searchSeat() {
     let foundSeatsCount = 0; // 发现的座位总数
     
     await sleep(1000);
-    toastInfo(`🚀 开始搜索座位<br>目标区块: [${blockSelect.join(', ')}]<br>用户ID: ${USERID}<br>📈 每${progressInterval}次请求显示进度<br>💡 刷新页面可停止搜索`);
+    let rowInfo = rowSelect.length > 0 ? `<br>目标排号: [${rowSelect.join(', ')}]` : '<br>排号过滤: 无限制';
+    toastInfo(`🚀 开始搜索座位<br>目标区块: [${blockSelect.join(', ')}]${rowInfo}<br>用户ID: ${USERID}<br>📈 每${progressInterval}次请求显示进度<br>💡 刷新页面可停止搜索`);
     
     while (!isSuccess) {
         if (seatQueue.length > 0) {

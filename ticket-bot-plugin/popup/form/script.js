@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', function  () {
                 if (data.date) document.getElementById('date').value = data.date;
                 if (data.time) document.getElementById('time').value = data.time;
                 if (data.section) document.getElementById('section').value = data.section;
+                if (data['row-numbers']) document.getElementById('row-numbers').value = data['row-numbers'];
             }
         }
     }
@@ -80,6 +81,12 @@ document.addEventListener('DOMContentLoaded', function  () {
         }
         
         data["section"] = validSections.join(",");
+        
+        // 处理排号配置
+        const rowNumbersInput = document.getElementById('row-numbers').value.trim();
+        if (rowNumbersInput) {
+            data["row-numbers"] = rowNumbersInput;
+        }
         
         data["platform"] = platform;
         let array = await get_stored_value("autoBooking") || [];
